@@ -281,6 +281,12 @@ function createSharedRdmDisk {
       $activeScsiController=New-HardDisk -VM $vm1Name -DiskType $diskType -DeviceName /vmfs/devices/disks/naa.$wwn | New-ScsiController -Type ParaVirtual -BusSharingMode Physical
     }
     
+    # adiciona o disco na VM2
+    $vm1NewDisk = Get-VM $vm1Name | Get-HardDisk | Where-Object {$_.ScsiCanonicalName -like "naa.${wwn}"}
+
+    addSharedHardDisk -vmName $vm2Name -Filename $vm1NewDisk.Filename -Controller $activeScsiController.Name -isRdm $true
+
+    # controle do limite de discos por controller
     $scsiControllerDisksCount++;
 
     if($scsiControllerDisksCount -eq $scsiControllerDisksLimit) {
@@ -289,10 +295,89 @@ function createSharedRdmDisk {
       $scsiControllerDisksCount=0
     }
   }
+}
 
-  # compartilhar os discos com a segunda maquina virtual
-  Get-VM $vm1Name | Get-HardDisk | Where-Object {$_.DiskType -eq $diskType} | ForEach-Object {
-    $scsi_controller=Get-ScsiController -HardDisk $_ 
-    addSharedHardDisk -vmName $vm2Name -Filename $_.Filename -Controller $scsi_controller.Name -isRdm $true
+# function createSharedRdmDiskVm1Only
+#
+# Cria discos RDM compartilhados.
+#
+# Params
+# String $wwnFileName path do arquivo com o wwn dos devices a serem adicionados como RDM
+# String $vm1Name nome da primeira VM
+function createSharedRdmDiskVm1Only {
+  param(
+    $wwnFileName, # arquivo com o wwn dos devices a serem adicionados como RDM
+    $vm1Name     # nome da primeira VM
+  )
+
+  $activeScsiController=$false
+  $scsiControllerDisksCount=0
+  $scsiControllerDisksLimit=15
+  $diskType="RawPhysical"
+
+  if(!$activeScsiController) {
+
+    # recuperar controladora compartilhada existente
+    $activeScsiController=Get-VM $vm1Name | Get-ScsiController | Where-Object {$_.BusSharingMode -eq "Physical"} | Select-Object -First 1 
+
+    if($activeScsiController) {
+
+      Get-VM $vm1Name | Get-HardDisk | ForEach-Object {
+        if($_ | Get-ScsiController | Where-Object {$_.Name -eq $activeScsiController.Name}) {
+          $scsiControllerDisksCount++;
+        }
+      }  
+    }
+  }
+
+  # abrir o arquivo texto e iterar entre cada um dos WWNs
+  Get-Content $wwnFileName | ForEach-Object {
+    $wwn=$_
+
+    if ($activeScsiController) {
+
+      New-HardDisk -VM $vm1Name -DiskType $diskType -DeviceName /vmfs/devices/disks/naa.$wwn -Controller $activeScsiController
+    }   
+    else {
+
+      $activeScsiController=New-HardDisk -VM $vm1Name -DiskType $diskType -DeviceName /vmfs/devices/disks/naa.$wwn | New-ScsiController -Type ParaVirtual -BusSharingMode Physical
+    }
+    
+    # controle do limite de discos por controller
+    $scsiControllerDisksCount++;
+
+    if($scsiControllerDisksCount -eq $scsiControllerDisksLimit) {
+
+      $activeScsiController=$false
+      $scsiControllerDisksCount=0
+    }
+  }
+}
+
+# function createSharedRdmDiskVm2Only
+#
+# Cria discos RDM compartilhados.
+#
+# Params
+# String $wwnFileName path do arquivo com o wwn dos devices a serem adicionados como RDM
+# String $vm1Name nome da primeira VM
+# String $vm2Name nome da segunda VM
+function createSharedRdmDiskVm2Only {
+  param(
+    $wwnFileName, # arquivo com o wwn dos devices a serem adicionados como RDM
+    $vm1Name,     # nome da primeira VM
+    $vm2Name      # nome da segunda VM
+  )
+
+  # abrir o arquivo texto e iterar entre cada um dos WWNs
+  Get-Content $wwnFileName | ForEach-Object {
+    $wwn=$_
+ 
+    # adiciona o disco na VM2
+    $vm1NewDisk = Get-VM $vm1Name | Get-HardDisk | Where-Object {$_.ScsiCanonicalName -like "naa.${wwn}"}
+
+    $scsiController=Get-ScsiController -HardDisk $vm1NewDisk
+
+    addSharedHardDisk -vmName $vm2Name -Filename $vm1NewDisk.Filename -Controller $scsiController.Name -isRdm $true
   }
 }
