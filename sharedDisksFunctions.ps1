@@ -1,12 +1,39 @@
-# function createSharedFlatHardDisk
+# Script sharedDisksFunctions.ps1
 #
-# Cria disco compartilhado entre duas máquinas virtuais. O disco criado é do tipo Flat.
+# Scripts de apoio a gestao de discos do vSphere.
 #
-# Params
-# * String $vm1Name nome da primeira VM (owner do disco)
-# * String $vm2Name nome da segunda VM
-# * Integer $capacityGB capacidade do disco a ser criado
-function createSharedFlatHardDisk {
+# Autor: Vinicius Porto Lima (vinicius.lima@tst.jus.br)
+#
+
+# Constants
+$SCSI_CONTROLLER_DISK_LIMIT=15       # limite de discos por scsi controller
+$SCSI_CONTROLLER_VM_LIMIT=4          # limite de scsi controllers por VM
+$RDM_SHARED_DISK_TYPE="RawPhysical"  # disk type para discos RDM compartilhados
+
+<#
+.SYNOPSIS
+Cria disco compartilhado entre duas maquinas virtuais. O disco criado e do tipo Flat e Thick EagerZeroed.
+
+.DESCRIPTION
+Cria disco compartilhado entre duas maquinas virtuais. O disco criado e do tipo Flat.
+
+.PARAMETER vm1Name
+nome da VM onde o disco sera criado
+
+.PARAMETER vm2Name
+nome da VM com a qual o disco sera compartilhado
+
+.PARAMETER capacityGB
+tamanho do disco flat a ser criado e compartilhado
+
+.EXAMPLE
+CreateSharedFlatHardDisk -vm1Name vm1157 -vm2Name vm1158 -capacityGB 100
+Cria disco Thick Eager Zeroed de 100 GB na vm1157 e compartilha com a vm1158
+
+.NOTES
+
+#>
+function CreateSharedFlatHardDisk {
   param (
     $vm1Name,
     $vm2Name,
@@ -17,7 +44,7 @@ function createSharedFlatHardDisk {
 
     if ($_.PowerState -eq 'PoweredOn') {
 
-      shutdownVmGuestSync -vmName $_.Name
+      ShutdownVmGuestSync -vmName $_.Name
     }
   }
 
@@ -62,19 +89,30 @@ function createSharedFlatHardDisk {
   }
 
   # coloca o disco em modo multi-writer (obrigatorio e compativel somente com vSphere 6)
-  allowVmDiskMultiWriter -vmName $vm1Name -hardDiskName $newSharedHardDisk.Name
+  AllowVmDiskMultiWriter -vmName $vm1Name -hardDiskName $newSharedHardDisk.Name
 
   # compartilha o disco com a vm 2 
-  addSharedHardDisk -vmName $vm2Name -Filename $newSharedHardDisk.Filename -Controller $($newSharedHardDisk | Get-ScsiController).Name
+  AddSharedHardDisk -vmName $vm2Name -Filename $newSharedHardDisk.Filename -Controller $($newSharedHardDisk | Get-ScsiController).Name
 }
 
-# function shutdownVmGuestSync
-#
-# Desliga a VM pelo guest de modo síncrono. Essa opção não está implementada por padrão.
-#
-# Params
-# * String $vmName nome da VM a ser desligada
-function shutdownVmGuestSync {
+<#
+.SYNOPSIS
+Desliga a VM pelo guest de modo sincrono.
+
+.DESCRIPTION
+Desliga a VM pelo guest de modo sincrono. Isso nao esta disponivel por padrao nos modulos VMware
+
+.PARAMETER vmName
+nome da VM
+
+.EXAMPLE
+ShutdownVmGuestSync -vmName vm1157
+Desliga a vm1157 pelo SO de modo sincrono.
+
+.NOTES
+
+#>
+function ShutdownVmGuestSync {
   param(
     $vmName
   )
@@ -86,16 +124,28 @@ function shutdownVmGuestSync {
   }
 }
 
-# function allowVmDiskMultiWriter 
-#
-# Ativa o MultiWriter no disco virtual.
-# 
-# Adaptado de https://github.com/lamw/vghetto-scripts/blob/master/powershell/configureMultiwriterVMDKFlag.ps1
-#
-# Params:
-# * String $vmName nome da VM dona do disco
-# * String $hardDiskName path do hard disk
-function allowVmDiskMultiWriter {
+<#
+.SYNOPSIS
+Ativa o MultiWriter no disco virtual
+
+.DESCRIPTION
+Ativa o MultiWriter no disco virtual. Esse modo permite que o disco seja compartilhado com outra VM.
+Adaptado de https://github.com/lamw/vghetto-scripts/blob/master/powershell/configureMultiwriterVMDKFlag.ps1
+
+.PARAMETER vmName
+nome da VM
+
+.PARAMETER hardDiskName
+nome do disco onde o modo multiwriter vai ser ativado.
+
+.EXAMPLE
+AllowVmDiskMultiWriter -vmName vm1157 -hardDiskName $(Get-VM vm1157 | Get-HardDisk | Where-Object {$_.Filename -like '*_2.vmdk'}).Filename
+Ativa o modo multiwriter do disco vm1157_2.vmdk
+
+.NOTES
+
+#>
+function AllowVmDiskMultiWriter {
   param(
     $vmName,      # nome da VM
     $hardDiskName # nome do HardDisk
@@ -132,16 +182,33 @@ function allowVmDiskMultiWriter {
   $task1 | Wait-Task
 }
 
-# function addSharedHardDisk
-#
-# Adiciona HD de uma VM em outra VM.
-# 
-# Params
-# * String $vmName nome da VM
-# * String $filename path do Harddisk a ser adicionado
-# * String $controller nome da controladora a ser utilizada
-# * Boolean $isRdm se o disco é RDM
-function addSharedHardDisk {
+<#
+.SYNOPSIS
+Adiciona HD de uma VM em outra VM.
+
+.DESCRIPTION
+Adiciona HD de uma VM em outra VM. Para tanto, a controladora SCSI deve ser compartilhada.
+
+.PARAMETER vmName
+nome da VM onde o disco sera adicionado
+
+.PARAMETER filename
+path do hard disk a ser adicionado (filename do objeto HardDisk)
+
+.PARAMETER controller
+nome da controladora onde o disco deve ser adicionado (sera criada, caso nao exista)
+
+.PARAMETER isRdm
+se o disco e ou nao e RDM
+
+.EXAMPLE
+AddSharedHardDisk -vmName vm1158 -filename $(Get-VM vm1157 | Get-HardDisk | Where-Object {$_.Filename -like '*_18.vmdk'}).Filename -controller "SCSI Controller 1" -isRdm:$true
+Adiciona o disco RDM vm1157_18.vmdk na controladora SCSI Controller 1 da VM vm1158
+
+.NOTES
+
+#>
+function AddSharedHardDisk {
   param(
     $vmName,
     $filename,
@@ -233,136 +300,183 @@ function addSharedHardDisk {
   }
 }
 
-# function createSharedRdmDisk
-#
-# Cria discos RDM compartilhados.
-#
-# Params
-# String $wwnFileName path do arquivo com o wwn dos devices a serem adicionados como RDM
-# String $vm1Name nome da primeira VM
-# String $vm2Name nome da segunda VM
-function createSharedRdmDisk {
-    param(
-      $wwnFileName, # arquivo com o wwn dos devices a serem adicionados como RDM
-      $vm1Name,     # nome da primeira VM
-      $vm2Name      # nome da segunda VM
-    )
+<#
+.SYNOPSIS
+Cria discos RDM compartilhados entre duas VMs
 
-  $activeScsiController=$false
-  $scsiControllerDisksCount=0
-  $scsiControllerDisksLimit=15
-  $diskType="RawPhysical"
+.DESCRIPTION
+Cria discos RDM compartilhados a partir de um arquivo com wwns, 1 por linha.
+Os discos são adicionados primeiramente na vm1, e depois são apontados tambem
+para a vm2.
 
-  if(!$activeScsiController) {
+.PARAMETER wwnFileName
+Path para arquivo txt com um wwn por linha
 
-    # recuperar controladora compartilhada existente
-    $activeScsiController=Get-VM $vm1Name | Get-ScsiController | Where-Object {$_.BusSharingMode -eq "Physical"} | Select-Object -First 1 
+.PARAMETER vm1Name
+nome da VM onde os discos serao criados
 
-    if($activeScsiController) {
+.PARAMETER vm2Name
+nome da VM com a qual os discos serao compartilhados
 
-      Get-VM $vm1Name | Get-HardDisk | ForEach-Object {
-        if($_ | Get-ScsiController | Where-Object {$_.Name -eq $activeScsiController.Name}) {
-          $scsiControllerDisksCount++;
-        }
-      }  
-    }
+.EXAMPLE
+CreateSharedRdmDisk -wwnFileName .\wwns.txt -vm1Name vm1157 -vm2Name vm1158
+
+.NOTES
+
+#>
+function CreateSharedRdmDisk {
+  param(
+    $wwnFileName, # arquivo com o wwn dos devices a serem adicionados como RDM
+    $vm1Name,     # nome da primeira VM
+    $vm2Name      # nome da segunda VM
+  )
+
+  if ($(Get-Content $wwnFileName | Measure-Object).Count -gt $(GetVmAvailableSharedDisksSlots -vmName $vm1Name)) {
+
+    throw 'There is not enough available disk slots for this operation'
   }
 
-  # abrir o arquivo texto e iterar entre cada um dos WWNs
-  Get-Content $wwnFileName | ForEach-Object {
-    $wwn=$_
-
-    if ($activeScsiController) {
-
-      New-HardDisk -VM $vm1Name -DiskType $diskType -DeviceName /vmfs/devices/disks/naa.$wwn -Controller $activeScsiController
-    }   
-    else {
-
-      $activeScsiController=New-HardDisk -VM $vm1Name -DiskType $diskType -DeviceName /vmfs/devices/disks/naa.$wwn | New-ScsiController -Type ParaVirtual -BusSharingMode Physical
-    }
-    
-    # adiciona o disco na VM2
-    $vm1NewDisk = Get-VM $vm1Name | Get-HardDisk | Where-Object {$_.ScsiCanonicalName -like "naa.${wwn}"}
-
-    addSharedHardDisk -vmName $vm2Name -Filename $vm1NewDisk.Filename -Controller $activeScsiController.Name -isRdm $true
-
-    # controle do limite de discos por controller
-    $scsiControllerDisksCount++;
-
-    if($scsiControllerDisksCount -eq $scsiControllerDisksLimit) {
-
-      $activeScsiController=$false
-      $scsiControllerDisksCount=0
-    }
-  }
+  CreateSharedRdmDiskVm1 -vm1Name $vm1Name -wwnFileName $wwnFileName
+  CreateSharedRdmDiskVm2 -vm1Name $vm1Name -vm2Name $vm2Name -wwnFileName $wwnFileName
 }
 
-# function createSharedRdmDiskVm1Only
-#
-# Cria discos RDM compartilhados.
-#
-# Params
-# String $wwnFileName path do arquivo com o wwn dos devices a serem adicionados como RDM
-# String $vm1Name nome da primeira VM
-function createSharedRdmDiskVm1Only {
+<#
+.SYNOPSIS
+Retorna o total de slots disponiveis para criacao de discos compartilhados
+
+.DESCRIPTION
+Retorna o total de slots disponiveis para a criação de discos. Considera espacos
+disponiveis em controladoras compartilhadas e a possibilidade de se criar mais
+controladoras compartilhadas.
+
+.PARAMETER vmName
+nome da VM
+
+.EXAMPLE
+GetVmAvailableSharedDisksSlots -vmName
+Retorna o montante de slots de discos compartilhados disponíveis na VM
+
+.NOTES
+
+#>
+function GetVmAvailableSharedDisksSlots {
+  param(
+    $vmName
+  )
+
+  $qntControllers=$(Get-VM $vmName | Get-ScsiController | Measure-Object).Count
+  $sharedControllers=Get-VM $vmName | Get-ScsiController | Where-Object {$_.BusSharingMode -eq "Physical"}
+
+  $diskCount = 0
+
+  foreach ($controller in $sharedControllers){
+
+    $diskCount = $diskCount + $(GetScsiControllerDisksCount -vmName $vmName -scsiControllerName $controller.Name)
+  }
+
+  $availableScsiSlot=$SCSI_CONTROLLER_VM_LIMIT-$qntControllers
+  $availableDiskSlots=(($($sharedControllers | Measure-Object).Count + $availableScsiSlot) * $SCSI_CONTROLLER_DISK_LIMIT) - $diskCount
+
+  return $availableDiskSlots
+}
+
+<#
+.SYNOPSIS
+Cria discos RDM compartilhaveis em uma VM
+
+.DESCRIPTION
+A partir de um arquivo texto contendo um WWN por linha, cria discos RDM RawPhysical
+compartilhaveis em uma determinada VM. Esses discos podem ser compartilhados com 
+outras VMs em um outro momento.
+
+.PARAMETER vm1Name
+Nome da VM onde os discos serao adicionados
+
+.PARAMETER wwnFileName
+Path do arquivo texto com um WWN por linha
+
+.EXAMPLE
+CreateSharedRdmDiskVm1 -wwnFileName .\wwns.txt -vm1Name vm1157
+Cria discos RDM compartilhaveis disponiveis nos WWNs do arquivo texto wwns.txt na VM vm1157
+
+.NOTES
+
+#>
+function CreateSharedRdmDiskVm1 {
   param(
     $wwnFileName, # arquivo com o wwn dos devices a serem adicionados como RDM
     $vm1Name     # nome da primeira VM
   )
 
-  $activeScsiController=$false
-  $scsiControllerDisksCount=0
-  $scsiControllerDisksLimit=15
-  $diskType="RawPhysical"
+  $wwns = Get-Content $wwnFileName
+  $activeScsiController = $false
+  $diskCount = 0
 
-  if(!$activeScsiController) {
+  foreach($wwn in $wwns){
 
-    # recuperar controladora compartilhada existente
-    $activeScsiController=Get-VM $vm1Name | Get-ScsiController | Where-Object {$_.BusSharingMode -eq "Physical"} | Select-Object -First 1 
+    # tenta recuperar uma controladora scsi, se nao tiver nenhuma ativa
+    if (!$activeScsiController) {
 
-    if($activeScsiController) {
+      $activeScsiController = GetAvailableSharedScsiController -vmName $vm1Name
+      
+      # se nao tiver nenhuma controladora disponivel e o limite de controladoras jah tiver sido atingido, iniciar excecao
+      if(!$activeScsiController -and $(Get-VM $vm1Name | Get-ScsiController | Measure-Object).Count -eq $SCSI_CONTROLLER_VM_LIMIT) {
 
-      Get-VM $vm1Name | Get-HardDisk | ForEach-Object {
-        if($_ | Get-ScsiController | Where-Object {$_.Name -eq $activeScsiController.Name}) {
-          $scsiControllerDisksCount++;
-        }
-      }  
+        throw "Shared disks limit reached"
+      }
+      elseif ($activeScsiController) {
+
+        $diskCount = GetScsiControllerDisksCount -vmName $vm1Name -scsiControllerName $activeScsiController.Name
+      }
     }
-  }
 
-  # abrir o arquivo texto e iterar entre cada um dos WWNs
-  Get-Content $wwnFileName | ForEach-Object {
-    $wwn=$_
-
+    # se a controladora estiver ativa, adicionar o disco nela
     if ($activeScsiController) {
 
-      New-HardDisk -VM $vm1Name -DiskType $diskType -DeviceName /vmfs/devices/disks/naa.$wwn -Controller $activeScsiController
+      New-HardDisk -VM $vm1Name -DiskType $RDM_SHARED_DISK_TYPE -DeviceName /vmfs/devices/disks/naa.$wwn -Controller $activeScsiController
+      $diskCount++
     }   
+    # caso contrario, criar uma nova controladora compartilhada
     else {
 
-      $activeScsiController=New-HardDisk -VM $vm1Name -DiskType $diskType -DeviceName /vmfs/devices/disks/naa.$wwn | New-ScsiController -Type ParaVirtual -BusSharingMode Physical
+      $activeScsiController=New-HardDisk -VM $vm1Name -DiskType $RDM_SHARED_DISK_TYPE -DeviceName /vmfs/devices/disks/naa.$wwn | New-ScsiController -Type ParaVirtual -BusSharingMode Physical
+      $diskCount = 1
     }
-    
-    # controle do limite de discos por controller
-    $scsiControllerDisksCount++;
 
-    if($scsiControllerDisksCount -eq $scsiControllerDisksLimit) {
+    if($diskCount -ge $SCSI_CONTROLLER_DISK_LIMIT) {
 
-      $activeScsiController=$false
-      $scsiControllerDisksCount=0
+      $activeScsiController = $false
+      $diskCount = 0
     }
   }
 }
 
-# function createSharedRdmDiskVm2Only
-#
-# Cria discos RDM compartilhados.
-#
-# Params
-# String $wwnFileName path do arquivo com o wwn dos devices a serem adicionados como RDM
-# String $vm1Name nome da primeira VM
-# String $vm2Name nome da segunda VM
-function createSharedRdmDiskVm2Only {
+<#
+.SYNOPSIS
+Compartilha discos RDM com uma segunda VM
+
+.DESCRIPTION
+A partir de um arquivo texto contendo um WWN de LUN por linha, identifica os respectivos discos
+na VM de origem, e compartilha os discos com a VM de destino. Os discos sao compartilhados em 
+controladoras SCSI espelho.
+
+.PARAMETER wwnFileName
+Path do arquivo texto com WWNs
+
+.PARAMETER vm1Name
+Nome da VM de origem, que já possui os discos mapeados
+
+.PARAMETER vm2Name
+Nome da VM de destino, com a qual os discos serão compartilhados
+
+.EXAMPLE
+CreateSharedRdmDiskVm2 -wwnFileName .\wwns.txt -vm1Name vm1157 -vm2Name vm1158
+Compartilha os discos disponiveis no arquivo wwns.txt que existem na VM vm1157 com a VM vm1158
+
+.NOTES
+
+#>
+function CreateSharedRdmDiskVm2 {
   param(
     $wwnFileName, # arquivo com o wwn dos devices a serem adicionados como RDM
     $vm1Name,     # nome da primeira VM
@@ -378,6 +492,86 @@ function createSharedRdmDiskVm2Only {
 
     $scsiController=Get-ScsiController -HardDisk $vm1NewDisk
 
-    addSharedHardDisk -vmName $vm2Name -Filename $vm1NewDisk.Filename -Controller $scsiController.Name -isRdm $true
+    AddSharedHardDisk -vmName $vm2Name -Filename $vm1NewDisk.Filename -Controller $scsiController.Name -isRdm $true
   }
+}
+
+<#
+.SYNOPSIS
+Retorna uma controladora compartilhada com espaço disponivel
+
+.DESCRIPTION
+Retorna a primeira controladora SCSI que tiver um ou mais slots de discos disponível. Se nao encontrar nenhuma controladora,
+retorna $false
+
+.PARAMETER vmName
+nome da VM
+
+.EXAMPLE
+GetAvailableSharedScsiController -vmName vm001
+
+.NOTES
+
+#>
+function GetAvailableSharedScsiController{
+
+  param(
+    $vmName
+  )
+
+  $availableScsiController=$false
+  $controllers = Get-VM $vmName | Get-ScsiController | Where-Object {$_.BusSharingMode -eq "Physical"} | Sort-Object Name
+
+  # recuperar controladora compartilhada com slot disponível
+  foreach ($controller in $controllers) {
+
+    $diskCount = GetScsiControllerDisksCount -vmName $vmName -scsiControllerName $controller.Name
+
+    if ($diskCount -lt $SCSI_CONTROLLER_DISK_LIMIT) {
+
+      $availableScsiController=$controller
+      break
+    } 
+  }
+
+  return $availableScsiController
+}
+
+<#
+.SYNOPSIS
+Retorna a quantidade de discos que existe em uma controladora
+
+.DESCRIPTION
+Retorna a quantidade de discos que existe em uma controladora
+
+.PARAMETER vmName
+nome da VM
+
+.PARAMETER scsiControllerName
+nome da controladora SCSI
+
+.EXAMPLE
+GetScsiControllerDisksCount -vmName vm001 -scsiControllerName "SCSI Controller 1"
+
+.NOTES
+
+#>
+function GetScsiControllerDisksCount {
+
+  param(
+    $vmName,
+    $scsiControllerName
+  )
+
+  $diskCount = 0
+      
+  Get-VM $vmName | Get-HardDisk | ForEach-Object {
+  
+    if($_ | Get-ScsiController | Where-Object {$_.Name -eq $scsiControllerName}) {
+      
+      $diskCount++;
+    }
+  }
+
+  return $diskCount
 }
