@@ -498,10 +498,10 @@ function CreateSharedRdmDiskVm2 {
 
 <#
 .SYNOPSIS
-Retorna uma controladora compartilhada com espaço disponivel
+Retorna uma controladora compartilhada com espaco disponivel
 
 .DESCRIPTION
-Retorna a primeira controladora SCSI que tiver um ou mais slots de discos disponível. Se nao encontrar nenhuma controladora,
+Retorna a primeira controladora SCSI que tiver um ou mais slots de discos disponivel. Se nao encontrar nenhuma controladora,
 retorna $false
 
 .PARAMETER vmName
